@@ -1,0 +1,203 @@
+---
+# https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.23/#configmap-v1-core
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bggdb-configmap
+  labels:
+    name: bggdb-configmap
+    owner: he
+data:
+  BGG_DB_USER: root
+  BGG_DB_HOST: bggdb-service
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bggdb-secret
+type: Opaque
+data:
+  BGG_DB_PASSWORD: Y2hhbmdlaXQ=
+---
+# DATABASE DEPLOY
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bggdb-deploy
+  labels:
+    name: bggdb-deploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: bggdb-pod
+  template:
+    metadata:
+      name: bggdb-pod
+      labels:
+        name: bggdb-pod
+    spec:
+      containers:
+      - name: bggdb-container
+        image: stackupiss/bgg-database:v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: bggdb-port
+          containerPort: 3306
+---
+# DATABASE SERVICE
+apiVersion: v1
+kind: Service
+metadata: 
+  name: bggdb-service
+  labels:
+    name: bggdb-service
+spec:
+  type: ClusterIP
+  selector:
+    name: bggdb-pod
+  ports:
+    - port: 3306
+      targetPort: 3306
+---
+# APP DEPLOY V1
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bggapp-deploy
+  labels:
+    name: bggapp-deploy
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      name: bggapp-pod
+  template:
+    metadata:
+      name: bggapp-pod
+      labels:
+        name: bggapp-pod
+    spec:
+      containers: 
+      - name: bggapp-container
+        image: stackupiss/bgg-backend:v1
+        imagePullPolicy: IfNotPresent
+        args: ["--prefix", "/v1"]
+        envFrom:
+          - configMapRef:
+              name: bggdb-configmap
+          - secretRef: 
+              name: bggdb-secret
+        ports:
+          - name: bggapp-port
+            containerPort: 3000
+        livenessProbe:
+          httpGet: 
+            path: /healthz
+            port: 3000
+            scheme: HTTP
+
+---
+# APP SERVICE V1
+apiVersion: v1
+kind: Service
+metadata:
+  name: bggapp-service
+  labels: 
+    name: bggapp-service
+spec:
+  type: ClusterIP
+  selector: 
+    name: bggapp-pod
+  ports:
+    - port: 80
+      targetPort: bggapp-port
+---
+# APP DEPLOY V2
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bggapp-deploy-v2
+  labels:
+    name: bggapp-deploy-v2
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      name: bggapp-pod-v2
+  template:
+    metadata:
+      name: bggapp-pod-v2
+      labels:
+        name: bggapp-pod-v2
+    spec:
+      containers: 
+      - name: bggapp-container
+        image: stackupiss/bgg-backend:v2
+        imagePullPolicy: IfNotPresent
+        args: ["--prefix", "/v2"]
+        envFrom:
+          - configMapRef:
+              name: bggdb-configmap
+          - secretRef: 
+              name: bggdb-secret
+        ports:
+          - name: bggapp-port
+            containerPort: 3000
+        livenessProbe:
+          httpGet: 
+            path: /healthz
+            port: 3000
+            scheme: HTTP
+---
+# APP SERVICE V2
+apiVersion: v1
+kind: Service
+metadata:
+  name: bggapp-service-v2
+  labels: 
+    name: bggapp-service-v2
+spec:
+  type: ClusterIP
+  selector: 
+    name: bggapp-pod-v2
+  ports:
+    - port: 80
+      targetPort: bggapp-port
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bggapp-ing
+  labels:
+    name: bggapp-ing
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: bgg-137.184.251.98.nip.io
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: bggapp-service
+                port:
+                  number: 80
+          - path: /v2
+            pathType: Prefix
+            backend:
+              service:
+                name: bggapp-service-v2
+                port:
+                  number: 80
