@@ -1,0 +1,142 @@
+---
+# https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.23/#configmap-v1-core
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-configmap
+  labels:
+    name: db-configmap
+    owner: he
+data:
+  MYSQL_DATABASE: exampledb
+  MYSQL_PASSWORD: examplepass
+  MYSQL_RANDOM_ROOT_PASSWORD: "1"
+  MYSQL_USER: exampleuser
+  WORDPRESS_DB_HOST: db-service
+  WORDPRESS_DB_NAME: exampledb
+  WORDPRESS_DB_PASSWORD: examplepass
+  WORDPRESS_DB_USER: exampleuser
+---
+# DATABASE DEPLOY
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-deploy
+  labels:
+    name: db-deploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: db-pod
+  template:
+    metadata:
+      name: db-pod
+      labels:
+        name: db-pod
+    spec:
+      containers:
+      - name: db-container
+        image: mysql:5.7
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: db-port
+          containerPort: 3306
+        envFrom:
+          - configMapRef:
+              name: db-configmap
+        # volumeMounts:
+        #   -name:
+
+---
+# DATABASE SERVICE
+apiVersion: v1
+kind: Service
+metadata: 
+  name: db-service
+  labels:
+    name: db-service
+spec:
+  type: ClusterIP
+  selector:
+    name: db-pod
+  ports:
+    - port: 3306
+      targetPort: 3306
+---
+# APP DEPLOY V1
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress-deploy
+  labels:
+    name: wordpress-deploy
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      name: wordpress-pod
+  template:
+    metadata:
+      name: wordpress-pod
+      labels:
+        name: wordpress-pod
+    spec:
+      containers: 
+      - name: wordpress-container
+        image: wordpress
+        imagePullPolicy: IfNotPresent
+        # args: ["--prefix", "/"]
+        envFrom:
+          - configMapRef:
+              name: db-configmap
+          # - secretRef: 
+          #     name: db-secret
+        ports:
+          - name: wordpress-port
+            containerPort: 80
+        # livenessProbe:
+        #   httpGet: 
+        #     path: /healthz
+        #     port: 3000
+        #     scheme: HTTP
+---
+# APP SERVICE V1
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress-service
+  labels: 
+    name: wordpress-service
+spec:
+  type: ClusterIP
+  selector: 
+    name: wordpress-pod
+  ports:
+    - port: 80
+      targetPort: wordpress-port
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: wordpress-ing
+  labels:
+    name: wordpress-ing
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: acme-146.190.5.208.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wordpress-service
+                port:
+                  number: 80
